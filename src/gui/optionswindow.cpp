@@ -13,6 +13,12 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// Ogre headers are included before the project headers: the latter define PI as
+// a macro, which breaks the use of Ogre::Math::PI.
+#include <OgreRoot.h>
+#include <OgreRenderWindow.h>
+#include <OgreSceneManager.h>
+
 #include "optionswindow.h"
 //#include "sound.h"
 #include "listitem.h"
@@ -875,6 +881,14 @@ bool OptionsWindow::onButtonOkClicked (const CEGUI::EventArgs& evt)
 	
 		someVideoSettingsWereChanged |= (newShadowSettings != Options::getInstance ()->getShadowMode ());
 
+		// A changed display mode or resolution can be applied without restarting.
+		const bool displayModeChanged = (userMode != Options::getInstance ()->getUsedDisplayMode ())
+			|| (userResolution != Options::getInstance ()->getUsedResolution ());
+		// A changed shadow mode can be applied without restarting.
+		const bool shadowModeChanged = (newShadowSettings != Options::getInstance ()->getShadowMode ());
+		// A changed video driver still requires a restart.
+		const bool restartRequired = (selectedDriverName != Options::getInstance ()->getUsedVideoDriver ());
+
 		// Perform the actual settings save operation. ----------------------------
 
 		if (someVideoSettingsWereChanged)
@@ -992,8 +1006,50 @@ bool OptionsWindow::onButtonOkClicked (const CEGUI::EventArgs& evt)
 			of.close();
 			// ----------------------------------------------------------------
 
-			// Show a notification, but not for a running game. We should basically have only 2 cases here:
-			if (m_document->getState () != Document::RUNNING)
+			// Apply the display mode and resolution immediately.
+			if (displayModeChanged)
+			{
+				Ogre::RenderWindow* window = Ogre::Root::getSingleton ().getAutoCreatedWindow ();
+				int width = 0;
+				int height = 0;
+				SumwarsHelper::getSizesFromResolutionString (userResolution, width, height);
+
+				if (window != 0 && width > 0 && height > 0)
+				{
+					window->setFullscreen (userMode == FULLSCREEN_EX, (unsigned int) width, (unsigned int) height);
+				}
+			}
+
+			// Apply the shadow mode immediately as well.
+			if (shadowModeChanged)
+			{
+				Ogre::SceneManager* scene_manager = Ogre::Root::getSingleton ().getSceneManager ("DefaultSceneManager");
+
+				if (scene_manager != 0)
+				{
+					switch (newShadowSettings)
+					{
+					case Options::SM_SA_SIMPLE:
+						scene_manager->setShadowTechnique (Ogre::SHADOWTYPE_STENCIL_ADDITIVE);
+						break;
+					case Options::SM_TA_SIMPLE:
+						scene_manager->setShadowTechnique (Ogre::SHADOWTYPE_TEXTURE_ADDITIVE);
+						break;
+					case Options::SM_TM_SIMPLE:
+						scene_manager->setShadowTechnique (Ogre::SHADOWTYPE_TEXTURE_MODULATIVE);
+						break;
+					case Options::SM_SM_SIMPLE:
+						scene_manager->setShadowTechnique (Ogre::SHADOWTYPE_STENCIL_MODULATIVE);
+						break;
+					default:
+						scene_manager->setShadowTechnique (Ogre::SHADOWTYPE_NONE);
+						break;
+					}
+				}
+			}
+
+			// Some changes can only be applied after a restart.
+			if (restartRequired && m_document->getState () != Document::RUNNING)
 			{
 				m_document->showWarning (gettext ("Please restart the game\n for the changes to take effect!"));
 			}
