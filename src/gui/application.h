@@ -20,6 +20,13 @@
 #include "OgreWindowEventUtilities.h"
 #include "OgreLogManager.h"
 #include "OgreMeshManager.h"
+#include "OgreFrameListener.h"
+#include "OgreTextureManager.h"
+#include "OgreRenderTarget.h"
+#include "OgreViewport.h"
+#include "OgreCamera.h"
+#include "OgreSceneManager.h"
+#include "OgreManualObject.h"
 
 // Utility for CEGUI cross-version compatibility
 #include "ceguiutility.h"
@@ -60,7 +67,7 @@
  */
 
 class Application
-    : public Ogre::WindowEventListener, public Ogre::RenderSystem::Listener
+    : public Ogre::WindowEventListener, public Ogre::RenderSystem::Listener, public Ogre::FrameListener
 
 {
 
@@ -117,6 +124,11 @@ class Application
          */
         virtual void eventOccurred(const Ogre::String &eventName, const Ogre::NameValuePairList *parameters);
 
+		/**
+		 * \brief Renders the game (scene and GUI) into its render target before the window is drawn.
+		 */
+		virtual bool frameStarted (const Ogre::FrameEvent& evt);
+
 		// ------------------------- Other functions ----------------------
 
 		/**
@@ -171,6 +183,19 @@ class Application
 		 * \brief Erzeugt das Document
 		 */
 		bool createDocument();
+
+		/**
+		 * \fn bool setupGameRenderTarget()
+		 * \brief Creates the render target the game (scene and GUI) is rendered into
+		 * and the objects needed to display it scaled to the window.
+		 */
+		bool setupGameRenderTarget();
+
+		/**
+		 * \fn void updateGameBlitQuad()
+		 * \brief Fits the quad that displays the game render target into the window.
+		 */
+		void updateGameBlitQuad();
 
 		/**
 		 * \brief loads the ressources specified by \a datagroups
@@ -251,6 +276,18 @@ class Application
 		 */
  		Ogre::SceneManager *m_scene_manager;
         
+
+		/**
+		 * \var Ogre::RenderTarget* m_game_render_target
+		 * \brief Target into which the game (scene and GUI) is rendered.
+		 */
+		Ogre::RenderTarget* m_game_render_target;
+
+		/**
+		 * \var Ogre::ManualObject* m_blit_quad
+		 * \brief Quad that displays the rendered game texture in the window.
+		 */
+		Ogre::ManualObject* m_blit_quad;
 
  		/**
 		 * \var bool m_shutdown

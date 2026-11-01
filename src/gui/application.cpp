@@ -107,6 +107,8 @@ Application::Application()
 	// Initialize application variables
 	m_main_window = 0;
 	m_document = 0;
+	m_game_render_target = 0;
+	m_blit_quad = 0;
 	bool ret = false;
 	m_running = false;
 	m_shutdown = false;
@@ -289,6 +291,10 @@ Application::~Application()
 	// Release (deallocate) dynamically allocated objects in reverse order. (reverse to their creation)
 
 	printf("deleting application\n");
+	if (m_ogre_root != 0)
+	{
+		m_ogre_root->removeFrameListener (this);
+	}
 	if (m_main_window)
 	{
 		delete m_main_window;
@@ -1052,10 +1058,139 @@ bool Application::createDocument()
 
 
 
+bool Application::frameStarted (const Ogre::FrameEvent& evt)
+{
+	// Render the scene and the GUI into the game texture. The window then displays
+	// this texture scaled to its own size, so that the whole game view is scaled.
+	m_game_render_target->update ();
+	CEGUI::System::getSingleton ().renderAllGUIContexts ();
+
+	return true;
+}
+
+
+
+bool Application::setupGameRenderTarget ()
+{
+	// Create the texture the whole game view (scene and GUI) is rendered into.
+	Ogre::TexturePtr game_texture = Ogre::TextureManager::getSingleton ().createManual (
+			"SumwarsGameTexture",
+			Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME,
+			Ogre::TEX_TYPE_2D,
+			m_window->getWidth (),
+			m_window->getHeight (),
+			0,
+			Ogre::PF_R8G8B8A8,
+			Ogre::TU_RENDERTARGET);
+
+	m_game_render_target = game_texture->getBuffer ()->getRenderTarget ();
+
+	// The texture is updated manually before the window is rendered.
+	m_game_render_target->setAutoUpdated (false);
+
+	// Make CEGUI render into the game texture as well and control the rendering manually.
+	CEGUI::OgreRenderer* renderer = static_cast<CEGUI::OgreRenderer*> (m_cegui_system->getRenderer ());
+	renderer->setDefaultRootRenderTarget (*m_game_render_target);
+	renderer->setRenderingEnabled (false);
+	m_cegui_system->notifyDisplaySizeChanged (CEGUI::Sizef (
+			(float) m_game_render_target->getWidth (),
+			(float) m_game_render_target->getHeight ()));
+
+	// Create the material used to display the game texture.
+	Ogre::MaterialPtr material = Ogre::MaterialManager::getSingleton ().create (
+			"SumwarsBlitMaterial", Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
+	Ogre::Pass* pass = material->getTechnique (0)->getPass (0);
+	pass->setLightingEnabled (false);
+	pass->setDepthCheckEnabled (false);
+	pass->setDepthWriteEnabled (false);
+	pass->setCullingMode (Ogre::CULL_NONE);
+	pass->setSceneBlending (Ogre::SBT_REPLACE);
+	Ogre::TextureUnitState* texture_unit = pass->createTextureUnitState ("SumwarsGameTexture");
+	texture_unit->setTextureFiltering (Ogre::TFO_BILINEAR);
+	texture_unit->setTextureAddressingMode (Ogre::TextureUnitState::TAM_CLAMP);
+
+	// Create a scene manager that only holds the quad displaying the game texture.
+	Ogre::SceneManager* blit_scene_manager = m_ogre_root->createSceneManager (Ogre::ST_GENERIC, "GameBlitSceneManager");
+	Ogre::Camera* blit_camera = blit_scene_manager->createCamera ("GameBlitCamera");
+	blit_camera->setProjectionType (Ogre::PT_ORTHOGRAPHIC);
+	blit_camera->setNearClipDistance (1.0f);
+	blit_camera->setFarClipDistance (10.0f);
+	blit_camera->setPosition (Ogre::Vector3 (0.5f, 0.5f, 5.0f));
+	blit_camera->lookAt (Ogre::Vector3 (0.5f, 0.5f, 0.0f));
+	blit_camera->setOrthoWindow (1.0f, 1.0f);
+
+	m_blit_quad = blit_scene_manager->createManualObject ("GameBlitQuad");
+	blit_scene_manager->getRootSceneNode ()->createChildSceneNode ()->attachObject (m_blit_quad);
+
+	Ogre::Viewport* blit_viewport = m_window->addViewport (blit_camera);
+	blit_viewport->setBackgroundColour (Ogre::ColourValue (0, 0, 0));
+	blit_viewport->setOverlaysEnabled (false);
+
+	updateGameBlitQuad ();
+
+	// The game has to be rendered before the window displays the result.
+	m_ogre_root->addFrameListener (this);
+
+	return true;
+}
+
+
+
+void Application::updateGameBlitQuad ()
+{
+	if (m_blit_quad == 0 || m_game_render_target == 0)
+	{
+		return;
+	}
+
+	const float windowWidth = (float) m_window->getWidth ();
+	const float windowHeight = (float) m_window->getHeight ();
+	const float targetWidth = (float) m_game_render_target->getWidth ();
+	const float targetHeight = (float) m_game_render_target->getHeight ();
+
+	if (windowWidth <= 0.0f || windowHeight <= 0.0f || targetWidth <= 0.0f || targetHeight <= 0.0f)
+	{
+		return;
+	}
+
+	// Scale the game view so that it fits into the window while keeping its proportions.
+	const float scaleX = windowWidth / targetWidth;
+	const float scaleY = windowHeight / targetHeight;
+	const float scale = (scaleX < scaleY) ? scaleX : scaleY;
+
+	const float width = targetWidth * scale / windowWidth;
+	const float height = targetHeight * scale / windowHeight;
+	const float left = (1.0f - width) * 0.5f;
+	const float top = (1.0f - height) * 0.5f;
+
+	// Render targets are stored upside down, so the vertical texture coordinate is flipped.
+	m_blit_quad->clear ();
+	m_blit_quad->begin ("SumwarsBlitMaterial", Ogre::RenderOperation::OT_TRIANGLE_LIST);
+	m_blit_quad->position (left, top, 0.0f);
+	m_blit_quad->textureCoord (0.0f, 1.0f);
+	m_blit_quad->position (left + width, top, 0.0f);
+	m_blit_quad->textureCoord (1.0f, 1.0f);
+	m_blit_quad->position (left + width, top + height, 0.0f);
+	m_blit_quad->textureCoord (1.0f, 0.0f);
+	m_blit_quad->position (left, top + height, 0.0f);
+	m_blit_quad->textureCoord (0.0f, 0.0f);
+	m_blit_quad->triangle (0, 1, 2);
+	m_blit_quad->triangle (0, 2, 3);
+	m_blit_quad->end ();
+}
+
+
+
 bool Application::createView()
 {
 	SW_DEBUG("create view\n");
-	m_main_window = new MainWindow(m_ogre_root, m_cegui_system,m_window,m_document);
+
+	if (! setupGameRenderTarget ())
+	{
+		return false;
+	}
+
+	m_main_window = new MainWindow(m_ogre_root, m_cegui_system,m_window,m_game_render_target,m_document);
 
 #ifdef SUMWARS_BUILD_TOOLS
 	new DebugPanel();
@@ -1481,7 +1616,13 @@ void Application::windowResized (Ogre::RenderWindow* rw)
 	// Only act for own renderwindow. Can it happen that we receive something else here? I don't know... doesn't hurt to check.
 	if (rw && rw == m_window)
 	{
-		// Currently this is a placeholder function.
+		if (m_main_window != 0)
+		{
+			m_main_window->windowResized (rw->getWidth (), rw->getHeight ());
+		}
+
+		// Fit the rendered game view into the resized window.
+		updateGameBlitQuad ();
 	}
 
 }

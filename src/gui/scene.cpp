@@ -43,10 +43,10 @@ using gussound::SoundManager;
 
 #include "gopenal.h"
 
-Scene::Scene(Document* doc,Ogre::RenderWindow* window)
+Scene::Scene(Document* doc,Ogre::RenderTarget* render_target)
 {
 	m_document = doc;
-	m_window = window;
+	m_render_target = render_target;
 	m_scene_manager = Ogre::Root::getSingleton().getSceneManager("DefaultSceneManager");
 	GraphicManager::setSceneManager(m_scene_manager);
 	
@@ -58,7 +58,7 @@ Scene::Scene(Document* doc,Ogre::RenderWindow* window)
 
 
 	// Viewport anlegen, Hintergrundfarbe schwarz
-	m_viewport = m_window->addViewport(m_camera);
+	m_viewport = m_render_target->addViewport(m_camera);
 	m_viewport->setBackgroundColour(Ogre::ColourValue(0,0,0));
 	m_camera->setAspectRatio(Ogre::Real(m_viewport->getActualWidth()) / Ogre::Real(m_viewport->getActualHeight()));
 
